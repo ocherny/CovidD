@@ -9,6 +9,7 @@ import math
 ramp = lambda u: np.maximum( u, 0 )
 step = lambda u: ( u > 0 ).astype(float)
 
+#this is unused
 def SegmentedLinearReg( X, Y, breakpoints ):
     nIterationMax = 10
 
