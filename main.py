@@ -51,6 +51,9 @@ def SegmentedLinearReg( X, Y, breakpoints ):
     return Xsolution, Ysolution
 
 
+def logifunc(x,A,x0,k,off):
+    return A / (1 + np.exp(-k*(x-x0)))+off
+
 url = 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv'
 r = requests.get(url, allow_redirects=True)
 open('data/time_series_19-covid-Confirmed.csv', 'wb').write(r.content)
@@ -90,7 +93,7 @@ def func_exp(x, a, b):
     return a * np.exp(b * (x))
 
 
-def func_seg(x, a1, b1, a2, b2, a3, b3):
+def func_seg(x, a1, b1, a2, b2, a3, amp, x0, k):
     r = np.piecewise(x,
                         condlist=[
                             x < a1,
@@ -103,7 +106,8 @@ def func_seg(x, a1, b1, a2, b2, a3, b3):
                             lambda x: 0,
                             lambda x: (x - a1) * b1,
                             lambda x: (x - a2) * b2 + (a2 - a1) * b1,
-                            lambda x: (x - a3) * b3 + (a3 - a2) * b2 + (a2 - a1) * b1,
+                            lambda x: logifunc(x, amp, x0, k, 0),
+                            #(x - a3) * b3 + (a3 - a2) * b2 + (a2 - a1) * b1,
                             lambda x: 4
                         ])
     return r
@@ -133,26 +137,63 @@ def expfit(set):
         b1 = subset[exp1] / exp1
 
 
-        def func_cseg(x, b2, b3):
-            return func_seg(x, 0, b1, exp1, b2, exp2, b3)
+
+        def func_cseg(x, b2, amp, x0, k):
+            return func_seg(x, 0, b1, exp1, b2, exp2, amp, x0, k)
 
         sigmas = np.zeros((1, len(subset)))
         sigmas[:exp1] = 0.25
         sigmas[exp1:] = 1
 
-        fit = curve_fit(func_cseg, np.arange(0, len(subset)), subset, p0=(0.5, 0.4)
+        fit = curve_fit(func_cseg, np.arange(0, len(subset)), subset, p0=(0.5, 100, 1, 0.1)
                         #, sigma=np.ones(len(subset)) * 0.5
                         )
         if exp2 < 1000:
             initialBreakpoints = [exp1, exp2]
         else:
             initialBreakpoints = [exp1]
-        try:
-            fit2 = SegmentedLinearReg(np.arange(0, len(subset)), subset, initialBreakpoints)
-        except np.linalg.LinAlgError:
-            fit2 = ["Err", "Err"]
+        # try:
+        #     fit2 = SegmentedLinearReg(np.arange(0, len(subset)), subset, initialBreakpoints)
+        # except np.linalg.LinAlgError:
+        #     fit2 = ["Err", "Err"]
 
-        return [b1, fit[0][0], fit[0][1], start, exp1, exp2, len(subset), fit2[0], fit2[1]]
+        b2 = fit[0][0]
+        amp = fit[0][1]
+        x0 = fit[0][2]
+        k = fit[0][3]
+        a2 = exp1
+        a3 = exp2
+
+        if len(subset) == 43:
+            print("Italy?")
+
+        doubling = 0
+
+        if exp2 == 1000:
+            doubling = math.log(2) / b2
+            amp = 0
+        maxx = len(set) - 1 - start
+        model = func_seg(float(maxx), 0, b1, a2, b2, a3, amp, x0, k)
+        cur_model = model
+
+        if exp2 < 1000:
+            double_model = np.log(np.exp(model) * 2)
+            double_before = 0
+            prev_model = model
+            for x in range(maxx + 1, maxx + 150):
+                model = func_seg(float(x), 0, b1, a2, b2, a3, amp, x0, k)
+                if model > double_model:
+                    double_before = x
+                    break
+                prev_model = model
+            if double_before != 0:
+                if len(subset) == 43:
+                    print("Italy?")
+                doubling = x - (maxx + 1)
+                doubling += 1 - ((double_model - prev_model) / (model - prev_model))
+        if doubling == 0:
+            amp = 0
+        return [b1, b2, amp, x0, k, start, a2, a3, doubling,  np.exp(cur_model), len(subset)]
     except RuntimeError as err:
         print(err)
         return "Error: " + str(err) + "\n" + str(set)
@@ -162,13 +203,15 @@ fits = countrydaysum.groupby(['Country/Region']).agg({'conf_c': expfit})
 fits_conf_c = fits.conf_c[fits.conf_c.apply(lambda x: not isinstance(x, str))]
 fits['b1'] = fits_conf_c.apply(lambda x: x[0])
 fits['b2'] = fits_conf_c.apply(lambda x: x[1])
-fits['b3'] = fits_conf_c.apply(lambda x: x[2])
-fits['start'] = fits_conf_c.apply(lambda x: x[3])
-fits['exp1_est'] = fits_conf_c.apply(lambda x: x[4])
-fits['exp2_est'] = fits_conf_c.apply(lambda x: x[5])
-fits['valid_days'] = fits_conf_c.apply(lambda x: x[6])
-fits['xs'] = fits_conf_c.apply(lambda x: x[7])
-fits['ys'] = fits_conf_c.apply(lambda x: x[8])
+fits['amp'] = fits_conf_c.apply(lambda x: x[2])
+fits['x0'] = fits_conf_c.apply(lambda x: x[3])
+fits['k'] = fits_conf_c.apply(lambda x: x[4])
+fits['start'] = fits_conf_c.apply(lambda x: x[5])
+fits['exp1_est'] = fits_conf_c.apply(lambda x: x[6])
+fits['exp2_est'] = fits_conf_c.apply(lambda x: x[7])
+fits['doubling'] = fits_conf_c.apply(lambda x: x[8])
+fits['cur_model'] = fits_conf_c.apply(lambda x: x[9])
+fits['valid_days'] = fits_conf_c.apply(lambda x: x[10])
 #fits.rename(columns={"conf_c", "fits"}, inplace=True)
 
 # def resid(set):
@@ -190,10 +233,13 @@ countrydaysum.set_index(['Country/Region', 'date'])
 fits.drop(columns=['conf_c'], inplace=True)
 
 
+
 def make_slope(row):
-    if row['exp2_est'] < 1000:
-        return row['b3']
-    return row['b2']
+
+#     if row['exp2_est'] < 1000:
+#         return row['b3']
+
+     return row['b2']
 
 
 fits['slope'] = fits.apply(make_slope, axis=1)
@@ -213,12 +259,16 @@ def row_model(group):
     a1 = 0
     b1 = group['b1']
     b2 = group['b2']
-    b3 = group['b3']
+    amp = group['amp']
+    x0 = group['x0']
+    k = group['k']
     a2 = group['exp1_est']
     a3 = group['exp2_est']
     def proj(x):
-        return func_seg(x, 0, b1, a2, b2, a3, b3)
+        return func_seg(x, 0, b1, a2, b2, a3, amp, x0, k)
     return np.exp(proj(x))
+
+
 
 #def model(data):
 #    return data.apply(row_model, axis=1)
