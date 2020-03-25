@@ -54,7 +54,8 @@ def SegmentedLinearReg( X, Y, breakpoints ):
 def logifunc(x,A,x0,k,off):
     return A / (1 + np.exp(-k*(x-x0)))+off
 
-url = 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv'
+url = 'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv'
+#'https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_19-covid-Confirmed.csv'
 r = requests.get(url, allow_redirects=True)
 open('data/time_series_19-covid-Confirmed.csv', 'wb').write(r.content)
 
@@ -175,6 +176,7 @@ def expfit(set):
         maxx = len(set) - 1 - start
         model = func_seg(float(maxx), 0, b1, a2, b2, a3, amp, x0, k)
         cur_model = model
+        days95 = 0
 
         if exp2 < 1000:
             double_model = np.log(np.exp(model) * 2)
@@ -186,14 +188,23 @@ def expfit(set):
                     double_before = x
                     break
                 prev_model = model
+
+
             if double_before != 0:
                 if len(subset) == 43:
                     print("Italy?")
                 doubling = x - (maxx + 1)
                 doubling += 1 - ((double_model - prev_model) / (model - prev_model))
+
+            for x in range(maxx + 1, maxx + 300):
+                model2 = func_seg(float(x), 0, b1, a2, b2, a3, amp, x0, k)
+                if np.exp(model2) > np.exp(amp) * 0.95:
+                    days95 = x
+                    break
+
         if doubling == 0:
             amp = 0
-        return [b1, b2, amp, x0, k, start, a2, a3, doubling,  np.exp(cur_model), len(subset)]
+        return [b1, b2, amp, x0, k, start, a2, a3, doubling,  np.exp(cur_model), len(subset), days95]
     except RuntimeError as err:
         print(err)
         return "Error: " + str(err) + "\n" + str(set)
@@ -212,6 +223,7 @@ fits['exp2_est'] = fits_conf_c.apply(lambda x: x[7])
 fits['doubling'] = fits_conf_c.apply(lambda x: x[8])
 fits['cur_model'] = fits_conf_c.apply(lambda x: x[9])
 fits['valid_days'] = fits_conf_c.apply(lambda x: x[10])
+fits['days95'] = fits_conf_c.apply(lambda x: x[11])
 #fits.rename(columns={"conf_c", "fits"}, inplace=True)
 
 # def resid(set):
